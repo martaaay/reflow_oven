@@ -21,6 +21,7 @@ from adafruit_mcp9600 import MCP9600
 import adafruit_ili9341
 import adafruit_focaltouch
 import adafruit_vs1053
+from adafruit_display_shapes.roundrect import RoundRect
 
 TITLE = "EZ Make Oven Controller!"
 VERSION = "1.3.2"
@@ -41,6 +42,11 @@ AUDIO_XDCS = board.D6  # Pin connected to VS1053 D/C line.
 vs1053 = adafruit_vs1053.VS1053(spi, AUDIO_MP3CS, AUDIO_XDCS, AUDIO_DREQ)
 vs1053.set_volume(0, 0)
 
+REFLOW_CONTROL_PIN = board.D13
+POWER_SWITCH_STATUS_PIN = board.D4 # Has pull up from display pcb
+
+power_switch_status = digitalio.DigitalInOut(POWER_SWITCH_STATUS_PIN)
+power_switch_status.direction = digitalio.Direction.INPUT
 
 i2c = busio.I2C(board.SCL, board.SDA, frequency=100000)
 ft = adafruit_focaltouch.Adafruit_FocalTouch(i2c, debug=False)
@@ -132,7 +138,7 @@ class ReflowOvenControl(object):
             self.sprofile = json.load(fpr)
             fpr.close()
         try:
-            self.sensor = MCP9600(i2c, self.config["sensor_address"], "K")
+            self.sensor = MCP9600(i2c, 0x60, "K")
             self.ontemp = self.sensor.temperature
             self.offtemp = self.ontemp
             self.sensor_status = True
@@ -178,7 +184,7 @@ class ReflowOvenControl(object):
         except AttributeError:
             temp = 32  # sensor not available, use 32 for testing
             self.sensor_status = False
-            # message.text = "Temperature sensor missing"
+            # set_message("Temperature sensor missing")
         self.beep.refresh()
         if self.state == "wait":
             self.enable(False)
@@ -196,16 +202,16 @@ class ReflowOvenControl(object):
         if self.state == "start" and temp >= 50:
             self.set_state("preheat")
         if self.state == "start":
-            message.text = "Starting"
+            set_message("Starting")
             self.enable(True)
         if self.state == "preheat" and temp >= self.sprofile["stages"]["soak"][1]:
             self.set_state("soak")
         if self.state == "preheat":
-            message.text = "Preheat"
+            set_message("Preheat")
         if self.state == "soak" and temp >= self.sprofile["stages"]["reflow"][1]:
             self.set_state("reflow")
         if self.state == "soak":
-            message.text = "Soak"
+            set_message("Soak")
         if (
             self.state == "reflow"
             and temp >= self.sprofile["stages"]["cool"][1]
@@ -219,12 +225,12 @@ class ReflowOvenControl(object):
             self.set_state("cool")
             self.beep.play(5)
         if self.state == "reflow":
-            message.text = "Reflow"
+            set_message("Reflow")
             if self.last_state != "reflow":
                 self.reflow_start = time.monotonic()
         if self.state == "cool":
             self.enable(False)
-            message.text = "Cool Down, Open Door"
+            set_message("Cool Down", "Open Door")
 
         if self.state in ("start", "preheat", "soak", "reflow"):
             if self.state != self.last_state:
@@ -530,9 +536,8 @@ def format_time(seconds):
     seconds = int(seconds) % 60
     return "{:02d}:{:02d}".format(minutes, seconds, width=2)
 
-
 timediff = 0
-oven = ReflowOvenControl(board.D4)
+oven = ReflowOvenControl(REFLOW_CONTROL_PIN)
 print("melting point: ", oven.sprofile["melting_point"])
 font1 = bitmap_font.load_font("/fonts/OpenSans-9.bdf")
 
@@ -548,26 +553,22 @@ display_group.append(label_reflow)
 #title_label.x = 5
 #title_label.y = 14
 #display_group.append(title_label)
-message = label.Label(font2, text="Wait")
-message.x = 90
-message.y = 10
-display_group.append(message)
-alloy_label = label.Label(font1, text="Alloy:", color=0xAAAAAA)
-alloy_label.x = 5
-alloy_label.y = 10
-display_group.append(alloy_label)
-alloy_data = label.Label(font1, text=str(oven.sprofile["alloy"]))
-alloy_data.x = 10
-alloy_data.y = 30-4
-display_group.append(alloy_data)
 profile_label = label.Label(font1, text="Profile:", color=0xAAAAAA)
 profile_label.x = 5
-profile_label.y = 80-30-4
+profile_label.y = 10
 display_group.append(profile_label)
 profile_data = label.Label(font1, text=oven.sprofile["title"])
 profile_data.x = 10
-profile_data.y = 100-30-8
+profile_data.y = 30-4
 display_group.append(profile_data)
+alloy_label = label.Label(font1, text="Alloy:", color=0xAAAAAA)
+alloy_label.x = 5
+alloy_label.y = 80-30-4
+display_group.append(alloy_label)
+alloy_data = label.Label(font1, text=str(oven.sprofile["alloy"]))
+alloy_data.x = 10
+alloy_data.y = 100-30-8
+display_group.append(alloy_data)
 timer_label = label.Label(font1, text="Time:", color=0xAAAAAA)
 timer_label.x = 5
 timer_label.y = 120-30-8
@@ -586,6 +587,14 @@ temp_data.y = 180-30-16
 display_group.append(temp_data)
 circle = Circle(308, 12, 8, fill=0)
 display_group.append(circle)
+message1 = label.Label(font2, text="Wait")
+message1.x = 90
+message1.y = 10
+display_group.append(message1)
+message2 = label.Label(font2, text="")
+message2.x = 90
+message2.y = 30
+display_group.append(message2)
 
 sgraph = Graph()
 
@@ -607,10 +616,15 @@ draw_profile(sgraph, oven.sprofile)
 
 #if oven.sensor_status:
 button = Button(
-    x=WIDTH-80, y=GYSTART-45, width=80, height=40, label="Start", label_font=font2
+    x=WIDTH-80, y=GYSTART-50, width=80, height=40, label="Disabled", label_font=font2, style=Button.ROUNDRECT
 )
-
+button._label.y -= 4;
 display_group.append(button)
+
+def set_message(line1, line2=""):
+    global message1, message2
+    message1.text = line1
+    message2.text = line2
 
 try:
     display.refresh(target_frames_per_second=60)
@@ -629,12 +643,25 @@ while True:
     except AttributeError:
         display.refresh_soon()
     oven.beep.refresh()  # this allows beeps less than one second in length
+
+    if power_switch_status.value:
+        set_message("Power Disabled")
+        if button.label != "Disabled":
+            button.label = "Disabled"
+            button._label.y -= 4
+        continue
+
     try:
         oven_temp = int(oven.sensor.temperature)
     except AttributeError:
         oven_temp = 32  # testing
         oven.sensor_status = False
-        message.text = "Bad/missing temp sensor"
+        set_message("Bad/missing temp","sensor")
+        if button.label != "Disabled":
+            button.label = "Disabled"
+            button._label.y -= 4
+        continue
+
     if oven.control != last_control:
         last_control = oven.control
         if oven.control:
@@ -655,12 +682,14 @@ while True:
             print("touch!")
             if oven.state == "ready":
                 button.label = "Stop"
+                button._label.y -= 4;
                 oven.set_state("start")
 
             else:
                 # cancel operation
-                message.text = "Wait"
+                set_message("Wait")
                 button.label = "Wait"
+                button._label.y -= 4;
                 oven.set_state("wait")
             time.sleep(1)  # for debounce
     if oven.sensor_status:
@@ -673,6 +702,7 @@ while True:
                 timer_data.text = format_time(0)
             if button.label != "Start":
                 button.label = "Start"
+                button._label.y -= 4;
         if oven.state == "start":
             status = "Starting"
             if last_state != "start":
@@ -688,7 +718,7 @@ while True:
         if oven.state == "cool" or oven.state == "wait":
             status = "Cool Down, Open Door"
         if last_status != status:
-            message.text = status
+            set_message(status)
             last_status = status
 
         if oven_temp != last_temp and oven.sensor_status:
