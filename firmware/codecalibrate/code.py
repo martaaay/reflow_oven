@@ -9,7 +9,7 @@ import busio
 import digitalio
 from adafruit_mcp9600 import MCP9600
 
-SENSOR_ADDR = 0X67
+SENSOR_ADDR = 0X60
 
 i2c = busio.I2C(board.SCL, board.SDA,frequency=200000)
 try:
@@ -19,7 +19,8 @@ except ValueError as e:
     print("Unable to connect to the thermocouple sensor.")
     sys.exit(1)
 
-oven = digitalio.DigitalInOut(board.D4)
+REFLOW_CONTROL_PIN = board.D13
+oven = digitalio.DigitalInOut(REFLOW_CONTROL_PIN)
 oven.direction = digitalio.Direction.OUTPUT
 
 def oven_control(enable=False):
