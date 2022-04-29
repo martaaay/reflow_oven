@@ -644,7 +644,7 @@ while True:
         display.refresh_soon()
     oven.beep.refresh()  # this allows beeps less than one second in length
 
-    if power_switch_status.value:
+    if power_switch_status.value and oven.state != "cool":
         set_message("Power Disabled")
         if button.label != "Disabled":
             button.label = "Disabled"
